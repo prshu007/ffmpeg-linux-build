@@ -46,5 +46,12 @@ jobs:
       - name: Upload FFmpeg Binary
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-x264-linux
-          path: ${{ runner.home }}/ffmpeg_build/bin/ffmpeg
+          name: ffmpeg-full-codec-linux
+          path: /home/runner/ffmpeg_build/bin/ffmpeg
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: "ffmpeg-full-codec-linux-reease"
+          tag_name: "v1.0-${{ github.run_number }}"
+          files: ${{ runner.home }}/ffmpeg_build/bin/ffmpeg
