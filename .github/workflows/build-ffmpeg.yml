@@ -47,11 +47,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-full-codec-linux
-          path: /home/runner/ffmpeg_build/bin/ffmpeg
+          path: /home/runner/ffmpeg-linux-build/bin/ffmpeg
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           name: "ffmpeg-full-codec-linux-reease"
           tag_name: "v1.0-${{ github.run_number }}"
-          files: ${{ runner.home }}/ffmpeg_build/bin/ffmpeg
+          files: ${{ runner.home }}/ffmpeg-linux-build/bin/ffmpeg
