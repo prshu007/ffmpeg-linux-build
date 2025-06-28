@@ -1,0 +1,58 @@
+name: Build FFmpeg with x264/x265 (Linux amd64)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install Build Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y autoconf automake build-essential cmake git libtool pkg-config yasm nasm
+
+      - name: Clone x264 and Build
+        run: |
+          git clone --depth 1 https://code.videolan.org/videolan/x264.git
+          cd x264
+          ./configure --prefix=$HOME/ffmpeg_build --enable-static
+          make -j$(nproc)
+          make install
+
+      - name: Clone x265 and Build
+        run: |
+          sudo apt install -y libnuma-dev
+          git clone --depth 1 https://bitbucket.org/multicoreware/x265_git
+          cd x265_git/build/linux
+          cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX=$HOME/ffmpeg_build -DENABLE_SHARED=off ../../source
+          make -j$(nproc)
+          make install
+
+      - name: Clone FFmpeg
+        run: |
+          git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg
+
+      - name: Build FFmpeg with x264/x265
+        run: |
+          cd ffmpeg
+          PKG_CONFIG_PATH="$HOME/ffmpeg_build/lib/pkgconfig" ./configure \
+            --prefix=$HOME/ffmpeg_build \
+            --pkg-config-flags="--static" \
+            --extra-cflags="-I$HOME/ffmpeg_build/include" \
+            --extra-ldflags="-L$HOME/ffmpeg_build/lib" \
+            --extra-libs="-lpthread -lm" \
+            --enable-gpl \
+            --enable-libx264 \
+            --enable-libx265 \
+            --enable-static \
+            --disable-shared
+          make -j$(nproc)
+          make install
+
+      - name: Upload FFmpeg Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-with-x264-x265
+          path: ${{ runner.home }}/ffmpeg_build/bin/ffmpeg
