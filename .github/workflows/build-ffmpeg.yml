@@ -1,95 +1,79 @@
-name: Build FFmpeg with libx264 for Broad Compatibility
+name: Build FFmpeg Static
 
 on:
+  workflow_dispatch: # Allows manual triggering
   push:
     branches:
-      - main
-  workflow_dispatch:
+      - main # Trigger on pushes to main branch
 
 jobs:
   build:
-    # Use a self-hosted runner OR run directly inside a compatible Docker container
-    runs-on: ubuntu-latest # Still use this for the runner OS
-    container: # Add this section
-      image: centos:7 # Example: CentOS 7 has an older GLIBC (around 2.17)
-      # Alternatively, for even more control and Python compatibility:
-      # image: quay.io/pypa/manylinux2014_x86_64 # Based on CentOS 7, good for binary distribution
-      options: --user root # Ensure root privileges inside the container
-
-    env:
-      FFMPEG_BUILD_DIR: /ffmpeg_build # Paths inside the container
-      FFMPEG_LIBS_DIR: /ffmpeg_build/ffmpeg_libs
-      FFMPEG_BIN_INSTALLED_DIR: /ffmpeg_build/bin_installed
-      PKG_CONFIG_PATH: /ffmpeg_build/ffmpeg_libs/lib/pkgconfig
-      PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin # Standard paths inside container
+    # Use an older Ubuntu version to get an older GLIBC for broader compatibility
+    # Ubuntu 18.04 (Bionic Beaver) uses GLIBC 2.27 or 2.28
+    runs-on: ubuntu-18.04 # IMPORTANT for GLIBC compatibility
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      # With 'container', the repository is usually mounted at /__w/<repo>/<repo>
-      # We'll adjust subsequent commands to copy what we need into the container's build dir
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Install build dependencies inside container
-      run: |
-        # For CentOS/RHEL/manylinux
-        yum update -y && yum install -y \
-          gcc gcc-c++ make autoconf automake libtool pkgconfig \
-          nasm yasm git tar gzip
+      - name: Set up build environment
+        run: |
+          sudo apt update
+          # Install build tools and essential dependencies
+          sudo apt install -y build-essential nasm automake libtool git pkg-config zlib1g-dev libnuma-dev
 
-    - name: Prepare build directories
-      run: |
-        mkdir -p "${{ env.FFMPEG_BUILD_DIR }}"
-        # Copy source code (if needed, though git clone can be done directly)
-        # You might need to adjust based on how actions/checkout mounts your repo
-        # For simplicity, let's just do git clones directly inside the container
+          # Create build directories
+          mkdir -p ~/ffmpeg_sources ~/ffmpeg_build ~/bin
+          echo "HOME=$HOME" >> $GITHUB_ENV # Ensure HOME is set for subsequent steps
+          echo "$HOME/bin" >> $GITHUB_PATH # Add local bin to PATH for subsequent steps
 
-    - name: Build libx264
-      working-directory: ${{ env.FFMPEG_BUILD_DIR }}
-      run: |
-        git clone https://code.videolan.org/videolan/x264.git
-        cd x264
-        ./configure --prefix="${{ env.FFMPEG_LIBS_DIR }}" --enable-static --disable-opencl
-        make -j$(nproc)
-        make install
+      - name: Compile x264
+        run: |
+          cd ~/ffmpeg_sources
+          git clone --depth 1 https://code.videolan.org/videolan/x264.git
+          cd x264
+          ./configure --prefix="$HOME/ffmpeg_build" --enable-static --enable-pic --disable-opencl
+          make -j$(nproc)
+          make install
 
-    - name: Build FFmpeg
-      working-directory: ${{ env.FFMPEG_BUILD_DIR }}
-      run: |
-        git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg
-        cd ffmpeg
-        ./configure \
-          --prefix="${{ env.FFMPEG_BIN_INSTALLED_DIR }}" \
-          --pkg-config-flags="--static" \
-          --extra-cflags="-I${{ env.FFMPEG_LIBS_DIR }}/include" \
-          --extra-ldflags="-L${{ env.FFMPEG_LIBS_DIR }}/lib" \
-          --bindir="/usr/local/bin" \ # Install directly to /usr/local/bin inside container for easy access
-          --enable-gpl \
-          --enable-libx264 \
-          --enable-nonfree \
-          --disable-shared \
-          --enable-static \
-          --disable-doc \
-          --disable-debug \
-          # --disable-ffplay \
-          # REMOVE THIS LINE: --disable-ffprobe
-        make -j$(nproc)
-        make install
+      - name: Compile FFmpeg
+        run: |
+          cd ~/ffmpeg_sources
+          git clone --depth 1 https://github.com/FFmpeg/FFmpeg.git
+          cd FFmpeg
 
-    - name: Verify FFmpeg installation
-      run: |
-        /usr/local/bin/ffmpeg -version # Call directly as PATH might not be updated for the specific user in container
+          ./configure \
+              --prefix="$HOME/ffmpeg_build" \
+              --pkg-config-flags="--static" \
+              --extra-cflags="-I$HOME/ffmpeg_build/include" \
+              --extra-ldflags="-L$HOME/ffmpeg_build/lib" \
+              --bindir="$HOME/bin" \
+              --enable-gpl \
+              --enable-libx264 \
+              --enable-version3 \
+              --disable-shared \
+              --enable-static \
+              --enable-zlib \
+              --enable-filter=overlay \
+              # Add other desired enabled libraries here, e.g.:
+              # --enable-libmp3lame --enable-libopus --enable-libvpx --enable-libwebp
 
-    - name: Package FFmpeg binaries
-      run: |
-        mkdir -p "${{ github.workspace }}/ffmpeg_build_output"
-        # Get the binaries from the container's /usr/local/bin
-        tar -czvf "${{ github.workspace }}/ffmpeg_build_output/ffmpeg-binaries-linux-amd64.tar.gz" -C /usr/local/bin ffmpeg ffprobe
-        # ^^^ -C /usr/local/bin: change directory before adding files to tar
-        # You might need to ensure ffprobe is built (remove --disable-ffprobe)
+          make -j$(nproc)
+          make install
 
-    - name: Upload FFmpeg binaries as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ffmpeg-linux-amd64
-        path: ${{ github.workspace }}/ffmpeg_build_output/ffmpeg-binaries-linux-amd64.tar.gz
-        retention-days: 7
+      - name: Verify FFmpeg build
+        run: |
+          ~/bin/ffmpeg -version
+          ldd ~/bin/ffmpeg
+
+      - name: Upload FFmpeg binary as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-static-linux-amd64
+          path: ~/bin/ffmpeg
+          retention-days: 7 # How long to keep the artifact
+
+      # Optional: Make the binary executable on the runner before upload if not already
+      - name: Make executable (redundant if make install handles this)
+        run: chmod +x ~/bin/ffmpeg
+        continue-on-error: true # Don't fail if already executable
